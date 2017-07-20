@@ -21,6 +21,10 @@ abstract class ShippingMethodBase extends PluginBase implements ContainerFactory
   /**
    * The package type manager.
    *
+   * Even though we don't need packages, it seems that this is a requirement for
+   * all shipping methods. We will be disabling access to the related
+   * configuration in the inheriting shipping method classes.
+   *
    * @var \Drupal\commerce_shipping\PackageTypeManagerInterface
    */
   protected $packageTypeManager;
@@ -114,6 +118,9 @@ abstract class ShippingMethodBase extends PluginBase implements ContainerFactory
    */
   public function defaultConfiguration() {
     return [
+      // Even though we don't need packages, it seems that this is a requirement
+      // for all shipping methods. We will be disabling access to this
+      // configuration in the inheriting shipping method classes.
       'default_package_type' => 'custom_box',
       'services' => [],
     ];
@@ -143,6 +150,9 @@ abstract class ShippingMethodBase extends PluginBase implements ContainerFactory
     array $form,
     FormStateInterface $form_state
   ) {
+    // Even though we don't need packages, it seems that this is a requirement
+    // for all shipping methods. We will be disabling access to this
+    // configuration in the inheriting shipping method classes.
     $package_types = $this->packageTypeManager->getDefinitionsByShippingMethod($this->pluginId);
     $package_types = array_map(function ($package_type) {
       return $package_type['label'];
