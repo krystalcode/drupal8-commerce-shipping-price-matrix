@@ -160,7 +160,6 @@ class PriceMatrix extends ShippingMethodBase {
     // entry even if there is an error only in one row.
     // Users can correct the CSV file and try again.
     foreach ($results as $key => $row) {
-      $r[] = $row;
       // We need at least 3 columns in each row otherwise the file is not valid.
       if (!isset($row[2])) {
         // Error
