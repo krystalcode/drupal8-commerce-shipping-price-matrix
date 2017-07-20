@@ -179,8 +179,11 @@ class PriceMatrix extends ShippingMethodBase {
 
       // Column 3: Entry value, either a price value or a percentage
       // i.e. numeric.
-      // @todo validate that the percentage is a number between 0 and 1
       if (!is_numeric($row[2])) {
+        // Error
+      }
+      // Additionally, percentages must be given as values between 0 and 1.
+      if ($row[1] === 'percentage' && ($row[2] < 0 || $row[2] > 1)) {
         // Error
       }
       $matrix_values[$key]['value'] = $row[2];
