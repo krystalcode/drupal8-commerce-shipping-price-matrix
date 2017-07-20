@@ -16,7 +16,9 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 /**
  * Provides the base class for shipping methods relying on a price matrix.
  */
-abstract class ShippingMethodBase extends PluginBase implements ContainerFactoryPluginInterface, ShippingMethodInterface {
+abstract class ShippingMethodBase
+  extends PluginBase
+  implements ContainerFactoryPluginInterface, ShippingMethodInterface {
 
   /**
    * The package type manager.
@@ -160,6 +162,7 @@ abstract class ShippingMethodBase extends PluginBase implements ContainerFactory
     $services = array_map(function ($service) {
       return $service->getLabel();
     }, $this->services);
+
     // Select all services by default.
     if (empty($this->configuration['services'])) {
       $service_ids = array_keys($services);

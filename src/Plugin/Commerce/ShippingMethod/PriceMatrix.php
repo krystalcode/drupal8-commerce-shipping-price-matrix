@@ -133,19 +133,25 @@ class PriceMatrix extends ShippingMethodBase {
     // 'csv_file'.
     $form_field_name = 'plugin';
     $all_files = \Drupal::request()->files->get('files', []);
+
     // Nothing to do if there was no file uploaded.
     if (empty($all_files[$form_field_name])) {
-      return NULL;
+      return;
     }
+
     $file_upload = $all_files[$form_field_name];
+    $file_realpath = $file_upload->getRealPath();
 
     // @todo: Validation.
+    // $file_upload->isValid()
+    // $file_upload->getErrorMessage()
+    // $file_upload->getClientMimeType();
+    // 'text/csv'
 
-    $file_realpath = $file_upload->getRealPath();
     // Read the values from the file.
     $reader = Reader::createFromPath($file_realpath);
     $results = $reader->fetch();
-    $r = [];
+
     // We'll be storing the final matrix values in the desired format here.
     $matrix_values = [];
 
@@ -229,6 +235,7 @@ class PriceMatrix extends ShippingMethodBase {
       $this->resolveMatrix($this->configuration['price_matrix'], $order_subtotal),
       $order_subtotal->getCurrencyCode()
     );
+
     // Rate IDs aren't relevant in our scenario.
     $rate_id = 0;
     $rates = [];
