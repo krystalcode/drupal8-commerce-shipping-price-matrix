@@ -372,7 +372,7 @@ class PriceMatrix extends ShippingMethodBase {
     $form_state->set(
       'commerce_shipping_price_matrix__updated',
       [
-        'currency_code' => 'USD',
+        'currency_code' => NULL,
         'values' => $matrix_values,
       ]
     );
@@ -451,9 +451,11 @@ class PriceMatrix extends ShippingMethodBase {
     $price_number = $price->getNumber();
 
     // The price matrix must be in the same currency as the order.
-    if ($matrix['currency_code'] !== $price_currency_code) {
-      throw new \Exception('The shipping price matrix must be at the same currency as the order total for calculating the shipping costs.');
-    }
+    // We currently disable the check until we have added the currency code in
+    // the configuration form.
+    // if ($matrix['currency_code'] !== $price_currency_code) {
+    //   throw new \Exception('The shipping price matrix must be at the same currency as the order total for calculating the shipping costs.');
+    // }
 
     // We detect which matrix entry the price falls under. It should be larger
     // or equal than the entry's threshold and smaller than the next entry's
