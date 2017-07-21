@@ -81,13 +81,13 @@ class PriceMatrix extends ShippingMethodBase {
     $form['price_matrix'] = [
       '#type' => 'fieldset',
       '#title' => t('Price matrix'),
-      '#description' => t(''),
+      '#description' => t('The Price Matrix defines how the shipping costs are calculated for a given order. Each entry is of one of two types: Fixed Amount or Percentage. Both types have a minimum of three elements.') . '<ol><li>' . t('Threshold: orders with a price that is larger or equal to this value and smaller than the threshold of the next entry will use this entry for calculating the shiping costs.') . '</li><li>' . t('Type: the type of the entry, Fixed Amount ("fixed_amount") or Percentage "percentage".') . '</li><li>' . t('Value: For Fixed Amount entries, simply a price. For Percentage entries, the percentage of the order price to charge as the shipping costs.') . '</ol>' . t('Entries of type Percentage can optionally have two additional elements.') . '<ol><li>' . t('Minimum: The minimum shipping costs to charge, if the calculated percentage is lower than this value.') . '</li><li>' . t('Maximum: The maximum shipping costs to charge, if the calculated percentage is higher than this value.') . '</li></ol>',
     ];
 
     $form['price_matrix']['csv_file'] = [
       '#type' => 'file',
       '#title' => t('Upload as a CSV file'),
-      '#description' => t('Add matrix entries from a CSV file. Columns should be in the following order: threshold, type, value, minimum, maximum. No header row should be present.') . '<br /><strong>' . t('All current entries will be removed and any updates via the form table below (available for existing price matrices) will not have any effect.') . '</strong><br /><br />',
+      '#description' => t('Add matrix entries from a CSV file. Columns should be in the following order: threshold, type, value, minimum, maximum. No header row should be present.') . '<br /><strong>' . t('All current entries will be removed and replaced by the entries defined in the uploaded file.') . '</strong>',
       '#weight' => 2,
     ];
 
@@ -115,46 +115,16 @@ class PriceMatrix extends ShippingMethodBase {
       '#weight' => 0,
     ];
 
-    $form['price_matrix']['help'] = [
-      '#markup' => '<br /><p>' . t('You can update the Price Matrix by uploading a CSV file or by directly editing the entries in the table below. Note that the table only allows you to edit existing entries at the moment - you cannot add new entries or remove existing ones. This will be fixed in future releases.') . '</p>',
-      '#weight' => 1,
+    // If we don't add the existing matrix as a form field, we won't have it
+    // available in the submit handler where we need to save it in the shipping
+    // method's configuration (if there's no CSV file upload). We therefor make
+    // it available as a hidden field. This should probably be a temporary
+    // solution until we implement a fully functioning form table that allows
+    // editing the matrix entries from the UI.
+    $form['price_matrix']['current_entries'] = [
+      '#type' => 'hidden',
+      '#default_value' => json_encode($this->configuration['price_matrix']['values']),
     ];
-
-    // Table for updating current values.
-    $form['price_matrix']['entries'] = [
-      '#type' => 'table',
-      '#header' => $header,
-      '#weight' => 3,
-    ];
-    foreach ($this->configuration['price_matrix']['values'] as $key => $value) {
-      $form['price_matrix']['entries'][$key]['threshold'] = [
-        '#type' => 'textfield',
-        '#default_value' => $value['threshold'],
-        '#required' => TRUE,
-      ];
-      $form['price_matrix']['entries'][$key]['type'] = [
-        '#type' => 'textfield',
-        '#default_value' => $value['type'],
-        '#required' => TRUE,
-      ];
-      $form['price_matrix']['entries'][$key]['value'] = [
-        '#type' => 'textfield',
-        '#default_value' => $value['value'],
-        '#required' => TRUE,
-      ];
-      if (!empty($value['min'])) {
-        $form['price_matrix']['entries'][$key]['min'] = [
-          '#type' => 'textfield',
-          '#default_value' => $value['min'],
-        ];
-      }
-      if (!empty($value['max'])) {
-        $form['price_matrix']['entries'][$key]['max'] = [
-          '#type' => 'textfield',
-          '#default_value' => $value['max'],
-        ];
-      }
-    }
 
     return $form;
   }
@@ -404,11 +374,14 @@ class PriceMatrix extends ShippingMethodBase {
     if ($price_matrix) {
       $this->configuration['price_matrix'] = $price_matrix;
     }
-    // Otherwise, we must have entries from the form table.
-    elseif (!empty($values['price_matrix']['entries'])) {
+    // Otherwise, we must have the existing entries from the hidden field.
+    elseif (!empty($values['price_matrix']['current_entries'])) {
       $this->configuration['price_matrix'] = [
         'currency_code' => NULL,
-        'values' => $values['price_matrix']['entries'],
+        'values' => json_decode(
+          $values['price_matrix']['current_entries'],
+          TRUE
+        ),
       ];
     }
   }
