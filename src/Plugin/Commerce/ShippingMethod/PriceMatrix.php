@@ -86,10 +86,15 @@ class PriceMatrix extends ShippingMethodBase {
 
     $form['price_matrix']['csv_file'] = [
       '#type' => 'file',
-      '#title' => t('Price matrix csv file'),
+      '#title' => t('Upload as a CSV file'),
+      '#description' => t('Add matrix entries from a CSV file. Columns should be in the following order: threshold, type, value, minimum, maximum. No header row should be present.') . '<br /><strong>' . t('All current entries will be removed and any updates via the form table below (available for existing price matrices) will not have any effect.') . '</strong><br /><br />',
+      '#weight' => 2,
     ];
 
     // Don't render the matrix table if it hasn't been defined yet.
+    // In the future we could render the table for adding/updating matrix
+    // entries, but at the moment there is no point in doing so because adding
+    // new entries is not supported.
     if (empty($this->configuration['price_matrix'])) {
       return $form;
     }
@@ -101,16 +106,55 @@ class PriceMatrix extends ShippingMethodBase {
       t('Minimum'),
       t('Maximum'),
     ];
-    $rows = $this->configuration['price_matrix']['values'];
-    $table = array(
+
+    // Read-only table for displaying current values.
+    $form['price_matrix']['display'] = [
       '#type' => 'table',
       '#header' => $header,
-      '#rows' => $rows,
-    );
-    $markup = drupal_render($table);
-    $form['price_matrix']['current_values'] = [
-      '#markup' => $markup,
+      '#rows' => $this->configuration['price_matrix']['values'],
+      '#weight' => 0,
     ];
+
+    $form['price_matrix']['help'] = [
+      '#markup' => '<br /><p>' . t('You can update the Price Matrix by uploading a CSV file or by directly editing the entries in the table below. Note that the table only allows you to edit existing entries at the moment - you cannot add new entries or remove existing ones. This will be fixed in future releases.') . '</p>',
+      '#weight' => 1,
+    ];
+
+    // Table for updating current values.
+    $form['price_matrix']['entries'] = [
+      '#type' => 'table',
+      '#header' => $header,
+      '#weight' => 3,
+    ];
+    foreach ($this->configuration['price_matrix']['values'] as $key => $value) {
+      $form['price_matrix']['entries'][$key]['threshold'] = [
+        '#type' => 'textfield',
+        '#default_value' => $value['threshold'],
+        '#required' => TRUE,
+      ];
+      $form['price_matrix']['entries'][$key]['type'] = [
+        '#type' => 'textfield',
+        '#default_value' => $value['type'],
+        '#required' => TRUE,
+      ];
+      $form['price_matrix']['entries'][$key]['value'] = [
+        '#type' => 'textfield',
+        '#default_value' => $value['value'],
+        '#required' => TRUE,
+      ];
+      if (!empty($value['min'])) {
+        $form['price_matrix']['entries'][$key]['min'] = [
+          '#type' => 'textfield',
+          '#default_value' => $value['min'],
+        ];
+      }
+      if (!empty($value['max'])) {
+        $form['price_matrix']['entries'][$key]['max'] = [
+          '#type' => 'textfield',
+          '#default_value' => $value['max'],
+        ];
+      }
+    }
 
     return $form;
   }
@@ -118,15 +162,11 @@ class PriceMatrix extends ShippingMethodBase {
   /**
    * {@inheritdoc}
    */
-  public function submitConfigurationForm(array &$form, FormStateInterface $form_state) {
-    parent::submitConfigurationForm($form, $form_state);
-
-    if ($form_state->getErrors()) {
-      return;
-    }
-
-    $values = $form_state->getValue($form['#parents']);
-    $this->configuration['rate_label'] = $values['rate_label'];
+  public function validateConfigurationForm(
+    array &$form,
+    FormStateInterface $form_state
+  ) {
+    parent::validateConfigurationForm($form, $form_state);
 
     // Get the matrix values from the uploaded CSV file, if provided.
     // The file is uploaded as 'plugin' even though the form field is defined as
@@ -140,85 +180,237 @@ class PriceMatrix extends ShippingMethodBase {
     }
 
     $file_upload = $all_files[$form_field_name];
-    $file_realpath = $file_upload->getRealPath();
+    if (!$file_upload->isValid()) {
+      $form_state->setErrorByName(
+        'csv_file',
+        $this->t(
+          'An error has occurred while uploading the CSV file, please try again. The error message was: @error_message',
+          [
+            '@error_message' => $file_upload->getErrorMessage(),
+          ]
+        )
+      );
+      return;
+    }
 
-    // @todo: Validation.
-    // $file_upload->isValid()
-    // $file_upload->getErrorMessage()
-    // $file_upload->getClientMimeType();
-    // 'text/csv'
+    // UploadFile advises to get the MIME type from getMimeType() as
+    // getClientMimeType() is not considered a safe value. However,
+    // getMimeType() does not always get it right as it tries to guess it from
+    // the file content, so we check for both.
+    if ($file_upload->getMimeType() !== 'text/csv' && $file_upload->getClientMimeType() !== 'text/csv') {
+      $form_state->setErrorByName(
+        'csv_file',
+        $this->t(
+          'The uploaded file must be in CSV format. Expected MIME type is "text/csv", "@mime_type" given.',
+          [
+            '@mime_type' => $file_upload->getClientMimeType(),
+          ]
+        )
+      );
+      return;
+    }
 
     // Read the values from the file.
+    $file_realpath = $file_upload->getRealPath();
     $reader = Reader::createFromPath($file_realpath);
-    $results = $reader->fetch();
+    $rows = $reader->fetch();
 
     // We'll be storing the final matrix values in the desired format here.
     $matrix_values = [];
 
-    // We prefer a strict validation which means that we'll be returning an
-    // error immediately when we detect one in any row. We won't be keeping any
-    // entry even if there is an error only in one row.
-    // Users can correct the CSV file and try again.
-    foreach ($results as $key => $row) {
+    // We prefer a strict validation which means that we won't be keeping any
+    // entry even if there is an error only in one row. Let's go through all
+    // rows for errors but display only one error per row at a time.
+    // Note: at the time of writing Drupal 8 does not support setting multiple
+    // errors per form element. Only one error will therefore be displayed for
+    // the CSV file element.
+    foreach ($rows as $row_key => $row) {
       // We need at least 3 columns in each row otherwise the file is not valid.
       if (!isset($row[2])) {
-        // Error
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t(
+            'Row %row_number has only %num_columns columns, at least three are required.',
+            [
+              '%row_number' => $row_key+1,
+              '%num_columns' => count($row),
+            ]
+          )
+        );
+        continue;
       }
 
       // Column 1: Price threshold, must be a numeric value.
-      if (!is_numeric($row[0])) {
-        // Error
+      $current_column_key = 0;
+      if (!is_numeric($row[$current_column_key])) {
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t(
+            'Row %row_number Column %column_number should hold a numeric value indicating the threshold price. "@column_value" given',
+            [
+              '%row_number' => $row_key+1,
+              '%column_number' => $current_column_key+1,
+              '@column_value' => $row[$current_column_key],
+            ]
+          )
+        );
+        continue;
       }
-      $matrix_values[$key]['threshold'] = $row[0];
+      $matrix_values[$row_key]['threshold'] = $row[$current_column_key];
 
       // Column 2: Entry type, 'fixed_amount' and 'percentage' supported.
-      if (!in_array($row[1], ['fixed_amount', 'percentage'])) {
-        // Error
+      $current_column_key = 1;
+      if (!in_array($row[$current_column_key], ['fixed_amount', 'percentage'])) {
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t(
+            'Row %row_number Column %column_number should either be "fixed_amount" or "percentage", indicating the type of the entry. "@column_value" given.',
+            [
+              '%row_number' => $row_key+1,
+              '%column_number' => $current_column_key+1,
+              '@column_value' => $row[$current_column_key],
+            ]
+          )
+        );
+        continue;
       }
-      $matrix_values[$key]['type'] = $row[1];
+      $matrix_values[$row_key]['type'] = $row[$current_column_key];
 
       // Column 3: Entry value, either a price value or a percentage
       // i.e. numeric.
-      if (!is_numeric($row[2])) {
-        // Error
+      $current_column_key = 2;
+      if (!is_numeric($row[$current_column_key])) {
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t(
+            'Row %row_number Column %column_number should hold a numeric value, indicating either a fixed amount or a percentage. "@column_value" given.',
+            [
+              '%row_number' => $row_key+1,
+              '%column_number' => $current_column_key+1,
+              '@column_value' => $row[$current_column_key],
+            ]
+          )
+        );
+        continue;
       }
       // Additionally, percentages must be given as values between 0 and 1.
-      if ($row[1] === 'percentage' && ($row[2] < 0 || $row[2] > 1)) {
-        // Error
+      if ($row[1] === 'percentage' && ($row[$current_column_key] < 0 || $row[$current_column_key] > 1)) {
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t(
+            'Row %row_number Column %column_number should hold a numeric value between 0 and 1, indicating a percentage. "@column_value" given.',
+            [
+              '%row_number' => $row_key+1,
+              '%column_number' => $current_column_key+1,
+              '@column_value' => $row[$current_column_key],
+            ]
+          )
+        );
+        continue;
       }
-      $matrix_values[$key]['value'] = $row[2];
+      $matrix_values[$row_key]['value'] = $row[$current_column_key];
 
       // If the entry type is 'fixed_amount' there should be no more columns.
       if ($row[1] === 'fixed_amount' && isset($row[3])) {
-        // Error
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t(
+            'Row %row_number that is of "fixed_amount" type should only have %num_columns columns.',
+            [
+              '%row_number' => $row_key+1,
+              '%num_columns' => count($row),
+            ]
+          )
+        );
+        continue;
       }
 
-      // Column 4: Minimum value, must be a numeric value.
-      if (isset($row[3])) {
-        if (!is_numeric($row[3])) {
-          // Error
+      // Column 4: Minimum value, optional, must be a numeric value.
+      $current_column_key = 3;
+      if (isset($row[$current_column_key])) {
+        if (!is_numeric($row[$current_column_key])) {
+          $form_state->setErrorByName(
+            'csv_file',
+            $this->t(
+              'Row %row_number Column %column_number should hold a numeric value, indicating a minimum cost. "@column_value" given.',
+              [
+                '%row_number' => $row_key+1,
+                '%column_number' => $current_column_key+1,
+                '@column_value' => $row[$current_column_key],
+              ]
+            )
+          );
+          continue;
         }
-        $matrix_values[$key]['min'] = $row[3];
+        $matrix_values[$row_key]['min'] = $row[$current_column_key];
       }
 
-      // Column 5: Maximum value, must be a numeric value.
-      if (isset($row[4])) {
-        if (!is_numeric($row[4])) {
-          // Error
+      // Column 5: Maximum value, optional, must be a numeric value.
+      $current_column_key = 4;
+      if (isset($row[$current_column_key])) {
+        if (!is_numeric($row[$current_column_key])) {
+          $form_state->setErrorByName(
+            'csv_file',
+            $this->t(
+              'Row %row_number Column %column_number should hold a numeric value, indicating a maximum cost. "@column_value" given.',
+              [
+                '%row_number' => $row_key+1,
+                '%column_number' => $current_column_key+1,
+                '@column_value' => $row[$current_column_key],
+              ]
+            )
+          );
+          continue;
         }
-        $matrix_values[$key]['max'] = $row[4];
+        $matrix_values[$row_key]['max'] = $row[$current_column_key];
       }
     }
 
-    // Save the final matrix in the method's configuration.
+    // Make the final matrix in the form's storage so that it can saved by the
+    // submit handler
     // @todo: Currency code configuration.
-    $this->configuration['price_matrix'] = [
-      'currency_code' => 'USD',
-      'values' => $matrix_values,
-    ];
+    $form_state->set(
+      'commerce_shipping_price_matrix__updated',
+      [
+        'currency_code' => 'USD',
+        'values' => $matrix_values,
+      ]
+    );
 
     // We are not storing the file, delete it.
     unlink($file_realpath);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function submitConfigurationForm(
+    array &$form,
+    FormStateInterface $form_state
+  ) {
+    if ($form_state->getErrors()) {
+      return;
+    }
+
+    parent::submitConfigurationForm($form, $form_state);
+
+    $values = $form_state->getValue($form['#parents']);
+    $this->configuration['rate_label'] = $values['rate_label'];
+
+    // Check if we have entries uploaded via a CSV file. They are saved in the
+    // FormState's storage by the validation handler. If we do, save them as the
+    // new price matrix.
+    $price_matrix = $form_state->get('commerce_shipping_price_matrix__updated');
+    if ($price_matrix) {
+      $this->configuration['price_matrix'] = $price_matrix;
+    }
+    // Otherwise, we must have entries from the form table.
+    elseif (!empty($values['price_matrix']['entries'])) {
+      $this->configuration['price_matrix'] = [
+        'currency_code' => NULL,
+        'values' => $values['price_matrix']['entries'],
+      ];
+    }
   }
 
   /**
