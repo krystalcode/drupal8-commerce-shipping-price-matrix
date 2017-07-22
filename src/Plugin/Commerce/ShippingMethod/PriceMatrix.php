@@ -396,6 +396,21 @@ class PriceMatrix extends ShippingMethodBase {
       }
     }
 
+    // To avoid possible accidental errors in the entries, we don't sort the
+    // entries ourselves. Instead, we detect whether they are in the correct
+    // order (lower threshold to higher threshold) and we raise an error if
+    // not.
+    foreach ($matrix_values as $key => $value) {
+      // The threshold should always be smaller than that of the next entry.
+      $next_key = $key+1;
+      if (!empty($matrix_values[$next_key]['threshold']) && !($value['threshold'] < $matrix_values[$next_key]['threshold'])) {
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t('The rows provided in the CSV file are not in the correct order. The threshold of each row must be lower than that of the next row.')
+        );
+      }
+    }
+
     // Make the final matrix in the form's storage so that it can saved by the
     // submit handler
     // @todo: Currency code configuration.
