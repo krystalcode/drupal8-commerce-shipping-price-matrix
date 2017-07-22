@@ -287,7 +287,7 @@ class PriceMatrix extends ShippingMethodBase {
         continue;
       }
       // The price threshold for the first entry should always be 0.
-      if ($row_key === 0 && $row[$current_column_key] !== 0) {
+      if ($row_key === 0 && (int) $row[$current_column_key] !== 0) {
         $form_state->setErrorByName(
           'csv_file',
           $this->t(
