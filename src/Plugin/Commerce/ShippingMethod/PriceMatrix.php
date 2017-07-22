@@ -144,8 +144,17 @@ class PriceMatrix extends ShippingMethodBase {
     $form_field_name = 'plugin';
     $all_files = \Drupal::request()->files->get('files', []);
 
-    // Nothing to do if there was no file uploaded.
+    // There's no further validation to do if there was no file uploaded, apart
+    // from guaranteeing that we do have an existing matrix since it is a
+    // requirement.
     if (empty($all_files[$form_field_name])) {
+      $values = $form_state->getValue($form['#parents']);
+      if (empty($values['price_matrix']['current_entries'])) {
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t('The Price Matrix cannot be empty. Please upload a CSV file with the matrix entries.')
+        );
+      }
       return;
     }
 
