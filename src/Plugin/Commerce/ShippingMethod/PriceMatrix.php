@@ -74,8 +74,8 @@ class PriceMatrix extends ShippingMethodBase {
 
     $form['rate_label'] = [
       '#type' => 'textfield',
-      '#title' => t('Rate label'),
-      '#description' => t('Shown to customers during checkout.'),
+      '#title' => $this->t('Rate label'),
+      '#description' => $this->t('Shown to customers during checkout.'),
       '#default_value' => $this->configuration['rate_label'],
       '#required' => TRUE,
     ];
@@ -84,7 +84,7 @@ class PriceMatrix extends ShippingMethodBase {
     // will calculate the shipping costs.
     $form['order_subtotal'] = [
       '#type' => 'fieldset',
-      '#title' => t('Order Subtotal Calculation'),
+      '#title' => $this->t('Order Subtotal Calculation'),
     ];
 
     // Allow excluding certain product variation types from the order subtotal
@@ -104,23 +104,23 @@ class PriceMatrix extends ShippingMethodBase {
 
     $form['order_subtotal']['exclude_product_variations'] = [
       '#type' => 'checkboxes',
-      '#title' => t('Exlclude product variations'),
+      '#title' => $this->t('Exlclude product variations'),
       '#options' => EntityHelper::extractLabels($product_variation_types),
       '#default_value' => $exclude_product_variations,
-      '#description' => t('The product variations that will be excluded from the order subtotal that will be used for calculating the shipping costs. If none selected, all product variations will be included in the calculation.'),
+      '#description' => $this->t('The product variations that will be excluded from the order subtotal that will be used for calculating the shipping costs. If none selected, all product variations will be included in the calculation.'),
     ];
 
     // Configuration related to the price matrix.
     $form['price_matrix'] = [
       '#type' => 'fieldset',
-      '#title' => t('Price matrix'),
-      '#description' => t('The Price Matrix defines how the shipping costs are calculated for a given order. Each entry is of one of two types: Fixed Amount or Percentage. Both types have a minimum of three elements.') . '<ol><li>' . t('Threshold: orders with a price that is larger or equal to this value and smaller than the threshold of the next entry will use this entry for calculating the shiping costs.') . '</li><li>' . t('Type: the type of the entry, Fixed Amount ("fixed_amount") or Percentage "percentage".') . '</li><li>' . t('Value: For Fixed Amount entries, simply a price. For Percentage entries, the percentage of the order price to charge as the shipping costs.') . '</ol>' . t('Entries of type Percentage can optionally have two additional elements.') . '<ol><li>' . t('Minimum: The minimum shipping costs to charge, if the calculated percentage is lower than this value.') . '</li><li>' . t('Maximum: The maximum shipping costs to charge, if the calculated percentage is higher than this value.') . '</li></ol>',
+      '#title' => $this->t('Price matrix'),
+      '#description' => $this->t('The Price Matrix defines how the shipping costs are calculated for a given order. Each entry is of one of two types: Fixed Amount or Percentage. Both types have a minimum of three elements.') . '<ol><li>' . $this->t('Threshold: orders with a price that is larger or equal to this value and smaller than the threshold of the next entry will use this entry for calculating the shiping costs.') . '</li><li>' . $this->t('Type: the type of the entry, Fixed Amount ("fixed_amount") or Percentage "percentage".') . '</li><li>' . $this->t('Value: For Fixed Amount entries, simply a price. For Percentage entries, the percentage of the order price to charge as the shipping costs.') . '</ol>' . $this->t('Entries of type Percentage can optionally have two additional elements.') . '<ol><li>' . $this->t('Minimum: The minimum shipping costs to charge, if the calculated percentage is lower than this value.') . '</li><li>' . $this->t('Maximum: The maximum shipping costs to charge, if the calculated percentage is higher than this value.') . '</li></ol>',
     ];
 
     $form['price_matrix']['csv_file'] = [
       '#type' => 'file',
-      '#title' => t('Upload as a CSV file'),
-      '#description' => t('Add matrix entries from a CSV file. Columns should be in the following order: threshold, type, value, minimum, maximum. No header row should be present.') . '<br /><strong>' . t('All current entries will be removed and replaced by the entries defined in the uploaded file.') . '</strong>',
+      '#title' => $this->t('Upload as a CSV file'),
+      '#description' => $this->t('Add matrix entries from a CSV file. Columns should be in the following order: threshold, type, value, minimum, maximum. No header row should be present.') . '<br /><strong>' . $this->t('All current entries will be removed and replaced by the entries defined in the uploaded file.') . '</strong>',
       '#weight' => 2,
     ];
 
@@ -151,11 +151,11 @@ class PriceMatrix extends ShippingMethodBase {
     }
 
     $header = [
-      t('Threshold'),
-      t('Type'),
-      t('Value'),
-      t('Minimum'),
-      t('Maximum'),
+      $this->t('Threshold'),
+      $this->t('Type'),
+      $this->t('Value'),
+      $this->t('Minimum'),
+      $this->t('Maximum'),
     ];
 
     // Read-only table for displaying current values.
