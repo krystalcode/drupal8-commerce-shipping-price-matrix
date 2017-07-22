@@ -124,11 +124,29 @@ class PriceMatrix extends ShippingMethodBase {
       '#weight' => 2,
     ];
 
+    // The current price matrix for display purposes. It will either be coming
+    // from the configuration when the form is first created, but when submitted
+    // and rebuild after an error the configuration won't be available and the
+    // price matrix is available via the hidden field - see below.
+    $price_matrix = NULL;
+    if (!empty($this->configuration['price_matrix']['values'])) {
+      $price_matrix = $this->configuration['price_matrix']['values'];
+    }
+    else {
+      $values = $form_state->getValue($form['#parents']);
+      if (!empty($values['price_matrix']['current_entries'])) {
+        $price_matrix = json_decode(
+          $values['price_matrix']['current_entries'],
+          TRUE
+        );
+      }
+    }
+
     // Don't render the matrix table if it hasn't been defined yet.
-    // In the future we could render the table for adding/updating matrix
+    // In the future we should add a form table for adding/updating matrix
     // entries, but at the moment there is no point in doing so because adding
     // new entries is not supported.
-    if (empty($this->configuration['price_matrix'])) {
+    if (!$price_matrix) {
       return $form;
     }
 
@@ -144,7 +162,7 @@ class PriceMatrix extends ShippingMethodBase {
     $form['price_matrix']['display'] = [
       '#type' => 'table',
       '#header' => $header,
-      '#rows' => $this->configuration['price_matrix']['values'],
+      '#rows' => $price_matrix,
       '#weight' => 0,
     ];
 
@@ -156,7 +174,7 @@ class PriceMatrix extends ShippingMethodBase {
     // editing the matrix entries from the UI.
     $form['price_matrix']['current_entries'] = [
       '#type' => 'hidden',
-      '#default_value' => json_encode($this->configuration['price_matrix']['values']),
+      '#default_value' => json_encode($price_matrix),
     ];
 
     return $form;
