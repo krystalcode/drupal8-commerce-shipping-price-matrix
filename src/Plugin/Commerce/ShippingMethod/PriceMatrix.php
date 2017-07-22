@@ -286,6 +286,21 @@ class PriceMatrix extends ShippingMethodBase {
         );
         continue;
       }
+      // The price threshold for the first entry should always be 0.
+      if ($row_key === 0 && $row[$current_column_key] !== 0) {
+        $form_state->setErrorByName(
+          'csv_file',
+          $this->t(
+            'The price threshold for the first entry (row %row_number, column %column_number) must be zero. "@column_value" given.',
+            [
+              '%row_number' => $row_key+1,
+              '%column_number' => $current_column_key+1,
+              '@column_value' => $row[$current_column_key],
+            ]
+          )
+        );
+        continue;
+      }
       $matrix_values[$row_key]['threshold'] = $row[$current_column_key];
 
       // Column 2: Entry type, 'fixed_amount' and 'percentage' supported.
