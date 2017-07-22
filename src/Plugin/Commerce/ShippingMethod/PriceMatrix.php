@@ -2,6 +2,7 @@
 
 namespace Drupal\commerce_shipping_price_matrix\Plugin\Commerce\ShippingMethod;
 
+use Drupal\commerce\EntityHelper;
 use Drupal\commerce_price\Calculator;
 use Drupal\commerce_price\Price;
 use Drupal\commerce_shipping\Entity\ShipmentInterface;
@@ -54,6 +55,7 @@ class PriceMatrix extends ShippingMethodBase {
   public function defaultConfiguration() {
     return [
       'price_matrix' => NULL,
+      'order_subtotal' => NULL,
       'rate_label' => NULL,
       'services' => ['default'],
     ] + parent::defaultConfiguration();
@@ -78,6 +80,37 @@ class PriceMatrix extends ShippingMethodBase {
       '#required' => TRUE,
     ];
 
+    // Configuration for how to calculate the order subtotal based on which we
+    // will calculate the shipping costs.
+    $form['order_subtotal'] = [
+      '#type' => 'fieldset',
+      '#title' => t('Order Subtotal Calculation'),
+    ];
+
+    // Allow excluding certain product variation types from the order subtotal
+    // that will be used to calculate the shipping costs.
+
+    // Get all product variation types for the form.
+    // @todo Ideally we should be getting the entity type manager with
+    // dependency injection.
+    $storage = \Drupal::service('entity_type.manager')->getStorage('commerce_product_variation_type');
+    $product_variation_types = $storage->loadMultiple();
+
+    // Currently excluded product variation types.
+    $exclude_product_variations = [];
+    if (!empty($this->configuration['order_subtotal']['exclude_product_variations'])) {
+      $exclude_product_variations = $this->configuration['order_subtotal']['exclude_product_variations'];
+    }
+
+    $form['order_subtotal']['exclude_product_variations'] = [
+      '#type' => 'checkboxes',
+      '#title' => t('Exlclude product variations'),
+      '#options' => EntityHelper::extractLabels($product_variation_types),
+      '#default_value' => $exclude_product_variations,
+      '#description' => t('The product variations that will be excluded from the order subtotal that will be used for calculating the shipping costs. If none selected, all product variations will be included in the calculation.'),
+    ];
+
+    // Configuration related to the price matrix.
     $form['price_matrix'] = [
       '#type' => 'fieldset',
       '#title' => t('Price matrix'),
@@ -374,7 +407,17 @@ class PriceMatrix extends ShippingMethodBase {
     parent::submitConfigurationForm($form, $form_state);
 
     $values = $form_state->getValue($form['#parents']);
+
+    // Rate label.
     $this->configuration['rate_label'] = $values['rate_label'];
+
+    // Excluded product variation types.
+    $exclude_product_variations = array_filter($values['order_subtotal']['exclude_product_variations']);
+    if ($exclude_product_variations) {
+      $this->configuration['order_subtotal'] = [
+        'exclude_product_variations' => $exclude_product_variations,
+      ];
+    }
 
     // Check if we have entries uploaded via a CSV file. They are saved in the
     // FormState's storage by the validation handler. If we do, save them as the
@@ -401,10 +444,26 @@ class PriceMatrix extends ShippingMethodBase {
   public function calculateRates(ShipmentInterface $shipment) {
     // Get the order subtotal which will be used as the price for calculating
     // the shipping costs.
-    // @todo configuration on which product types/variations to include/exclude
-    //       in the price calculation
     $order = $shipment->getOrder();
     $order_subtotal = $order->getSubtotalPrice();
+
+    // If we have any product variation types configured to be excluded from the
+    // order subtotal, go through all order items and subtract the total price
+    // of all items that match the specified product variation types.
+    if (!empty($this->configuration['order_subtotal']['exclude_product_variations'])) {
+      $order_items = $order->getItems();
+      foreach ($order_items as $order_item) {
+        $purchased_entity = $order_item->getPurchasedEntity();
+        $excluded_type = $purchased_entity->getEntityTypeId() === 'commerce_product_variation';
+        $excluded_bundle = in_array(
+          $purchased_entity->bundle(),
+          $this->configuration['order_subtotal']['exclude_product_variations']
+        );
+        if ($excluded_type && $excluded_bundle) {
+          $order_subtotal = $order_subtotal->subtract($order_item->getTotalPrice());
+        }
+      }
+    }
 
     // Calculate the shipping costs.
     $amount = new Price(
