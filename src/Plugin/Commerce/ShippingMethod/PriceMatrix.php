@@ -552,7 +552,10 @@ class PriceMatrix extends ShippingMethodBase {
     $exclude_product_variations_exist = !empty($this->configuration['order_subtotal']['exclude_product_variations']);
     $exclude_from_shipping_fields_exist = !empty($this->configuration['order_subtotal']['exclude_from_shipping_fields']);
     if ($exclude_product_variations_exist || $exclude_from_shipping_fields_exist) {
-      $exclude_from_shipping_field = $this->configuration['order_subtotal']['exclude_from_shipping_fields'][0];
+      if ($exclude_from_shipping_fields_exist) {
+        $exclude_from_shipping_field = $this->configuration['order_subtotal']['exclude_from_shipping_fields'][0];
+      }
+
       $order_items = $order->getItems();
       foreach ($order_items as $order_item) {
         // Should we exclude this order item?
@@ -576,7 +579,7 @@ class PriceMatrix extends ShippingMethodBase {
         // If the item has not already been excluded based on its type, and it
         // is a product, check if it should be excluded based on the
         // exclude-from-shipping-field.
-        if (!$exclude_from_shipping && $exclude_type) {
+        if ($exclude_from_shipping_fields_exist && !$exclude_from_shipping && $exclude_type) {
           if ($purchased_entity->hasField($exclude_from_shipping_field)) {
             $exclude_product = $purchased_entity->get($exclude_from_shipping_field)->getValue();
             if ($exclude_product[0]['value']) {
