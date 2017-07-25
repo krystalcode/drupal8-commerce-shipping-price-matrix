@@ -612,6 +612,9 @@ class PriceMatrix extends ShippingMethodBase {
    *   The price matrix that will be used for calculating the shipping costs.
    * @param \Drupal\commerce_price\Price
    *   The price based on which the shipping costs will be calculated.
+   *
+   * @return string
+   *   The amount to be charged as shipping costs.
    */
   protected function resolveMatrix(array $matrix, $price) {
     $price_currency_code = $price->getCurrencyCode();
