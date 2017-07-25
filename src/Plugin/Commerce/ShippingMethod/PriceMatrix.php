@@ -54,8 +54,8 @@ class PriceMatrix extends ShippingMethodBase {
    */
   public function defaultConfiguration() {
     return [
-      'price_matrix' => NULL,
-      'order_subtotal' => NULL,
+      'price_matrix' => [],
+      'order_subtotal' => [],
       'rate_label' => NULL,
       'services' => ['default'],
     ] + parent::defaultConfiguration();
@@ -94,7 +94,7 @@ class PriceMatrix extends ShippingMethodBase {
     // @todo Ideally we should be getting the entity type manager with
     // dependency injection.
     $storage = \Drupal::service('entity_type.manager')->getStorage('commerce_product_variation_type');
-    $product_variation_types = $storage->loadMultiple();
+    $product_variation_types = EntityHelper::extractLabels($storage->loadMultiple());
 
     // Currently excluded product variation types.
     $exclude_product_variations = [];
@@ -105,9 +105,52 @@ class PriceMatrix extends ShippingMethodBase {
     $form['order_subtotal']['exclude_product_variations'] = [
       '#type' => 'checkboxes',
       '#title' => $this->t('Exlclude product variations'),
-      '#options' => EntityHelper::extractLabels($product_variation_types),
+      '#options' => $product_variation_types,
       '#default_value' => $exclude_product_variations,
       '#description' => $this->t('The product variations that will be excluded from the order subtotal that will be used for calculating the shipping costs. If none selected, all product variations will be included in the calculation.'),
+    ];
+
+    // Allow excluding individual product variations using a boolean field.
+    // Here admins can select which field to check for the exclude from shipping
+    // value.
+
+    // Detect all boolean fields that belong to product variation types.
+    $exclude_from_shipping_options = ['_none_' => 'None'];
+    // Don't add to the options fields that are not relevant to the case.
+    $fields_blacklist = ['status', 'default_langcode'];
+    foreach ($product_variation_types as $key => $label) {
+      // @todo Ideally we should be getting the entity manager with dependency
+      // injection.
+      $bundle_fields = \Drupal::entityManager()->getFieldDefinitions(
+        'commerce_product_variation',
+        $key
+      );
+      foreach ($bundle_fields as $field) {
+        $field_type = $field->getType();
+        $field_name = $field->getName();
+        if ($field_type === 'boolean' && !in_array($field_name, $fields_blacklist)) {
+          if (!isset($exclude_from_shipping_options[$field_name])) {
+            $exclude_from_shipping_options[$field_name] = $field->getLabel() . ' (' . $field_name . ')';
+          }
+        }
+      }
+    }
+
+    // Current exclude-from-shipping field.
+    // We currently provide a single-select form element. However, for future
+    // compatibility in case we need to provide a multi-select, we store the
+    // settings in the configuration as an array of fields.
+    $exclude_from_shipping_field = '_none_';
+    if (!empty($this->configuration['order_subtotal']['exclude_from_shipping_fields'][0])) {
+      $exclude_from_shipping_field = $this->configuration['order_subtotal']['exclude_from_shipping_fields'][0];
+    }
+
+    $form['order_subtotal']['exclude_from_shipping_field'] = [
+      '#type' => 'select',
+      '#title' => $this->t('Exclude from Shipping Field'),
+      '#options' => $exclude_from_shipping_options,
+      '#default_value' => $exclude_from_shipping_field,
+      '#description' => $this->t('Individual product variations that have the chosen boolean field set to a boolean TRUE value (or 1) will be excluded from the order subtotal when calculating the shipping costs. If the field is not set or if it is set to a boolean FALSE (or 0) value the shipping costs calculation will not be affected.'),
     ];
 
     // Configuration related to the price matrix.
@@ -462,9 +505,16 @@ class PriceMatrix extends ShippingMethodBase {
     // Excluded product variation types.
     $exclude_product_variations = array_filter($values['order_subtotal']['exclude_product_variations']);
     if ($exclude_product_variations) {
-      $this->configuration['order_subtotal'] = [
-        'exclude_product_variations' => $exclude_product_variations,
-      ];
+      $this->configuration['order_subtotal']['exclude_product_variations'] = $exclude_product_variations;
+    }
+
+    // Exclude-from-shipping field.
+    if ($values['order_subtotal']['exclude_from_shipping_field'] !== '_none_') {
+      // We currently provide a single-select form element, so the form element
+      // value is a single value. However, for future compatibility in case we
+      // need to provide a multi-select, we store the settings in the
+      // configuration as an array of fields.
+      $this->configuration['order_subtotal']['exclude_from_shipping_fields'] = [$values['order_subtotal']['exclude_from_shipping_field']];
     }
 
     // Check if we have entries uploaded via a CSV file. They are saved in the
@@ -495,19 +545,47 @@ class PriceMatrix extends ShippingMethodBase {
     $order = $shipment->getOrder();
     $order_subtotal = $order->getSubtotalPrice();
 
-    // If we have any product variation types configured to be excluded from the
-    // order subtotal, go through all order items and subtract the total price
-    // of all items that match the specified product variation types.
-    if (!empty($this->configuration['order_subtotal']['exclude_product_variations'])) {
+    // We go through all order items and check if there are products that match
+    // the product variation types that should be exclude from shipping, or that
+    // have set the boolean field that determines that the specific product
+    // should be excluded from shipping.
+    $exclude_product_variations_exist = !empty($this->configuration['order_subtotal']['exclude_product_variations']);
+    $exclude_from_shipping_fields_exist = !empty($this->configuration['order_subtotal']['exclude_from_shipping_fields']);
+    if ($exclude_product_variations_exist || $exclude_from_shipping_fields_exist) {
+      $exclude_from_shipping_field = $this->configuration['order_subtotal']['exclude_from_shipping_fields'][0];
       $order_items = $order->getItems();
       foreach ($order_items as $order_item) {
+        // Should we exclude this order item?
+        $exclude_from_shipping = FALSE;
+
         $purchased_entity = $order_item->getPurchasedEntity();
-        $excluded_type = $purchased_entity->getEntityTypeId() === 'commerce_product_variation';
-        $excluded_bundle = in_array(
-          $purchased_entity->bundle(),
-          $this->configuration['order_subtotal']['exclude_product_variations']
-        );
-        if ($excluded_type && $excluded_bundle) {
+        $exclude_type = $purchased_entity->getEntityTypeId() === 'commerce_product_variation';
+
+        // If the order item is a product and it is of the ones configured to be
+        // excluded, exclude it.
+        if ($exclude_product_variations_exist) {
+          $exclude_bundle = in_array(
+            $purchased_entity->bundle(),
+            $this->configuration['order_subtotal']['exclude_product_variations']
+          );
+          if ($exclude_type && $exclude_bundle) {
+            $exclude_from_shipping = TRUE;
+          }
+        }
+
+        // If the item has not already been excluded based on its type, and it
+        // is a product, check if it should be excluded based on the
+        // exclude-from-shipping-field.
+        if (!$exclude_from_shipping && $exclude_type) {
+          if ($purchased_entity->hasField($exclude_from_shipping_field)) {
+            $exclude_product = $purchased_entity->get($exclude_from_shipping_field)->getValue();
+            if ($exclude_product[0]['value']) {
+              $exclude_from_shipping = TRUE;
+            }
+          }
+        }
+
+        if ($exclude_from_shipping) {
           $order_subtotal = $order_subtotal->subtract($order_item->getTotalPrice());
         }
       }
