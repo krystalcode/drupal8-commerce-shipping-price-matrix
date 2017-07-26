@@ -193,6 +193,7 @@ class PriceMatrix extends ShippingMethodBase {
       return $form;
     }
 
+    // Read-only table for displaying current values.
     $header = [
       $this->t('Threshold'),
       $this->t('Type'),
@@ -201,7 +202,6 @@ class PriceMatrix extends ShippingMethodBase {
       $this->t('Maximum'),
     ];
 
-    // Read-only table for displaying current values.
     $form['price_matrix']['display'] = [
       '#type' => 'table',
       '#header' => $header,
