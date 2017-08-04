@@ -17,8 +17,6 @@ use Drupal\Tests\UnitTestCase;
  */
 class PriceMatrixText extends UnitTestCase {
 
-  protected $priceMatrix;
-
   /**
    * Provides data for testCalculateRates().
    *
