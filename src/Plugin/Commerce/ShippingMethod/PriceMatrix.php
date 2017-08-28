@@ -153,6 +153,46 @@ class PriceMatrix extends ShippingMethodBase {
       '#description' => $this->t('Individual product variations that have the chosen boolean field set to a boolean TRUE value (or 1) will be excluded from the order subtotal when calculating the shipping costs. If the field is not set or if it is set to a boolean FALSE (or 0) value the shipping costs calculation will not be affected.'),
     ];
 
+    // Configuration that allows to choose which types of order item adjustments
+    // should be included in the order subtotal that will be used for shipping
+    // cost calculation. By default, none.
+    $include_order_item_adjustments = [];
+    if (!empty($this->configuration['order_subtotal']['include_order_item_adjustments'])) {
+      $include_order_item_adjustments = $this->configuration['order_subtotal']['include_order_item_adjustments'];
+    }
+
+    // There's no way to get a list of adjustment types because the adjustment
+    // type is just a string that the module creating the adjustment
+    // adds. There's 3 main known types, 'promotion', 'tax', and 'shipping'. We
+    // obviously exclude shipping adjustments.
+    // @todo Allow modules to add custom adjustments types via an Event
+    $adjustment_types = [
+      'promotion' => $this->t('Promotion'),
+      'tax' => $this->t('Tax'),
+    ];
+
+    $form['order_subtotal']['include_order_item_adjustments'] = [
+      '#type' => 'checkboxes',
+      '#title' => $this->t('Indluce Adjustments on Order Items'),
+      '#options' => $adjustment_types,
+      '#default_value' => $include_order_item_adjustments,
+      '#description' => $this->t('By default, price adjustments on order items (such as promotion discounts) are not taken into account and only the base product price will be added to order subtotal that will be used to calculate the shipping costs. Adjustments of the selected types will be taken into account instead.'),
+    ];
+
+    // The same for order adjustments.
+    $include_order_adjustments = [];
+    if (!empty($this->configuration['order_subtotal']['include_order_adjustments'])) {
+      $include_order_adjustments = $this->configuration['order_subtotal']['include_order_adjustments'];
+    }
+
+    $form['order_subtotal']['include_order_adjustments'] = [
+      '#type' => 'checkboxes',
+      '#title' => $this->t('Indluce Adjustments on Order'),
+      '#options' => $adjustment_types,
+      '#default_value' => $include_order_adjustments,
+      '#description' => $this->t('By default, price adjustments on the order (such as promotion discounts) are not taken into account and only the order subtotal for shipping costs calculation purposes will be based on product prices and order item adjustments. Order-level adjustments of the selected types will be taken into account instead.'),
+    ];
+
     // Configuration related to the price matrix.
     $form['price_matrix'] = [
       '#type' => 'fieldset',
@@ -517,6 +557,18 @@ class PriceMatrix extends ShippingMethodBase {
       $this->configuration['order_subtotal']['exclude_from_shipping_fields'] = [$values['order_subtotal']['exclude_from_shipping_field']];
     }
 
+    // Included adjustment types.
+    $include_order_item_adjustments = array_filter($values['order_subtotal']['include_order_item_adjustments']);
+    if ($include_order_item_adjustments) {
+      $this->configuration['order_subtotal']['include_order_item_adjustments'] = $include_order_item_adjustments;
+    }
+
+    // Included adjustment types.
+    $include_order_adjustments = array_filter($values['order_subtotal']['include_order_adjustments']);
+    if ($include_order_adjustments) {
+      $this->configuration['order_subtotal']['include_order_adjustments'] = $include_order_adjustments;
+    }
+
     // Check if we have entries uploaded via a CSV file. They are saved in the
     // FormState's storage by the validation handler. If we do, save them as the
     // new price matrix.
@@ -540,64 +592,13 @@ class PriceMatrix extends ShippingMethodBase {
    * {@inheritdoc}
    */
   public function calculateRates(ShipmentInterface $shipment) {
-    // Get the order subtotal which will be used as the price for calculating
-    // the shipping costs.
-    $order = $shipment->getOrder();
-    $order_subtotal = $order->getSubtotalPrice();
+    // Calculate the order subtotal that will be taken into account. Varies
+    // depending on configuration.
+    $subtotal_for_shipping = $this->calculateSubtotalForShipping($shipment);
 
-    // We go through all order items and check if there are products that match
-    // the product variation types that should be exclude from shipping, or that
-    // have set the boolean field that determines that the specific product
-    // should be excluded from shipping.
-    $exclude_product_variations_exist = !empty($this->configuration['order_subtotal']['exclude_product_variations']);
-    $exclude_from_shipping_fields_exist = !empty($this->configuration['order_subtotal']['exclude_from_shipping_fields']);
-    if ($exclude_product_variations_exist || $exclude_from_shipping_fields_exist) {
-      if ($exclude_from_shipping_fields_exist) {
-        $exclude_from_shipping_field = $this->configuration['order_subtotal']['exclude_from_shipping_fields'][0];
-      }
-
-      $order_items = $order->getItems();
-      foreach ($order_items as $order_item) {
-        // Should we exclude this order item?
-        $exclude_from_shipping = FALSE;
-
-        $purchased_entity = $order_item->getPurchasedEntity();
-        $exclude_type = $purchased_entity->getEntityTypeId() === 'commerce_product_variation';
-
-        // If the order item is a product and it is of the ones configured to be
-        // excluded, exclude it.
-        if ($exclude_product_variations_exist) {
-          $exclude_bundle = in_array(
-            $purchased_entity->bundle(),
-            $this->configuration['order_subtotal']['exclude_product_variations']
-          );
-          if ($exclude_type && $exclude_bundle) {
-            $exclude_from_shipping = TRUE;
-          }
-        }
-
-        // If the item has not already been excluded based on its type, and it
-        // is a product, check if it should be excluded based on the
-        // exclude-from-shipping-field.
-        if ($exclude_from_shipping_fields_exist && !$exclude_from_shipping && $exclude_type) {
-          if ($purchased_entity->hasField($exclude_from_shipping_field)) {
-            $exclude_product = $purchased_entity->get($exclude_from_shipping_field)->getValue();
-            if ($exclude_product[0]['value']) {
-              $exclude_from_shipping = TRUE;
-            }
-          }
-        }
-
-        if ($exclude_from_shipping) {
-          $order_subtotal = $order_subtotal->subtract($order_item->getTotalPrice());
-        }
-      }
-    }
-
-    // Calculate the shipping costs.
     $amount = new Price(
-      $this->resolveMatrix($this->configuration['price_matrix'], $order_subtotal),
-      $order_subtotal->getCurrencyCode()
+      $this->resolveMatrix($this->configuration['price_matrix'], $subtotal_for_shipping),
+      $subtotal_for_shipping->getCurrencyCode()
     );
 
     // Rate IDs aren't relevant in our scenario.
@@ -606,6 +607,150 @@ class PriceMatrix extends ShippingMethodBase {
     $rates[] = new ShippingRate($rate_id, $this->services['default'], $amount);
 
     return $rates;
+  }
+
+  /**
+   * Calculates the order subtotal for shipping cost calculation purposes.
+   *
+   * Depending on the shipping method's configuration, it may exclude order items
+   * based on their product variation type or based on the value of a boolean
+   * field that may be present on the product variation. It may also include
+   * adjustments on the order or on order items based on their type.
+   *
+   * @param \Drupal\commerce_shipping\Entity\ShipmentInterface $shipment
+   *   The shipment.
+   *
+   * @param \Drupal\commerce_price\Price
+   *   The order subtotal based on which the shipping costs will be calculated.
+   */
+  public function calculateSubtotalForShipping(ShipmentInterface $shipment) {
+    $order = $shipment->getOrder();
+    $order_subtotal = $order->getSubtotalPrice();
+
+    $exclude_product_variations_exist = !empty($this->configuration['order_subtotal']['exclude_product_variations']);
+    $exclude_from_shipping_fields_exist = !empty($this->configuration['order_subtotal']['exclude_from_shipping_fields']);
+    $include_order_item_adjustments_exist = !empty($this->configuration['order_subtotal']['include_order_item_adjustments']);
+    $include_order_adjustments_exist = !empty($this->configuration['order_subtotal']['include_order_adjustments']);
+
+    // If we do not exclude any variation types or specific varitions, and if we
+    // do not include any adjustments, calculate the rates on the order
+    // subtotal.
+    if (!(
+        $exclude_product_variations_exist ||
+        $exclude_from_shipping_fields_exist ||
+        $include_order_item_adjustments_exist ||
+        $include_order_adjustments_exist
+      )) {
+      return $order_subtotal;
+    }
+
+    $order_currency = $order_subtotal->getCurrencyCode();
+
+    $subtotal_for_shipping = new Price('0', $order_currency);
+
+    if ($exclude_from_shipping_fields_exist) {
+      $exclude_from_shipping_field = $this->configuration['order_subtotal']['exclude_from_shipping_fields'][0];
+    }
+
+    $order_items = $order->getItems();
+    foreach ($order_items as $order_item) {
+      // Should we exclude this order item?
+      $exclude_from_shipping = FALSE;
+
+      $purchased_entity = $order_item->getPurchasedEntity();
+      $exclude_type = $purchased_entity->getEntityTypeId() === 'commerce_product_variation';
+
+      // If the order item is a product and it is of the ones configured to be
+      // excluded, exclude it.
+      if ($exclude_product_variations_exist) {
+        $exclude_bundle = in_array(
+          $purchased_entity->bundle(),
+          $this->configuration['order_subtotal']['exclude_product_variations']
+        );
+        if ($exclude_type && $exclude_bundle) {
+          $exclude_from_shipping = TRUE;
+        }
+      }
+
+      // If the item has not already been excluded based on its type, and it
+      // is a product, check if it should be excluded based on the
+      // exclude-from-shipping-field.
+      if ($exclude_from_shipping_fields_exist && !$exclude_from_shipping && $exclude_type) {
+        if ($purchased_entity->hasField($exclude_from_shipping_field)) {
+          $exclude_product = $purchased_entity->get($exclude_from_shipping_field)->getValue();
+          if ($exclude_product[0]['value']) {
+            $exclude_from_shipping = TRUE;
+          }
+        }
+      }
+
+      if ($exclude_from_shipping) {
+        continue;
+      }
+
+      // This shouldn't happen really, but we haven't investigated
+      // multi-currency scenarios so let's avoid uncaught exceptions.
+      $order_item_price = $order_item->getTotalPrice();
+      if ($order_currency !== $order_item_price->getCurrencyCode()) {
+        continue;
+      }
+      $subtotal_for_shipping = $subtotal_for_shipping->add($order_item_price);
+
+      // Go through order item adjustments and include those that are of the
+      // types chosen in the configuration. Take quantity into account because
+      // the adjustment amount is per unit.
+      if ($include_order_item_adjustments_exist) {
+        $order_item_quantity = $order_item->getQuantity();
+        $order_item_adjustments = $order_item->getAdjustments();
+
+        foreach ($order_item_adjustments as $adjustment) {
+          $include_adjustment = in_array(
+            $adjustment->getType(),
+            $this->configuration['order_subtotal']['include_order_item_adjustments']
+          );
+          if ($include_adjustment) {
+            $adjustment_amount = $adjustment->getAmount();
+            // This shouldn't happen really, but we haven't investigated
+            // multi-currency scenarios so let's avoid uncaught exceptions.
+            if ($order_currency !== $adjustment_amount->getCurrencyCode()) {
+              continue;
+            }
+            $adjustment_amount = $adjustment_amount->multiply($order_item_quantity);
+            $subtotal_for_shipping = $subtotal_for_shipping->add($adjustment_amount);
+          }
+        }
+      }
+    }
+
+    // Go through order adjustments and include those that are of the types
+    // chosen in the configuration.
+    if ($include_order_adjustments_exist) {
+      $order_adjustments = $order->getAdjustments();
+
+      foreach ($order_adjustments as $adjustment) {
+        $include_adjustment = in_array(
+          $adjustment->getType(),
+          $this->configuration['order_subtotal']['include_order_adjustments']
+        );
+        if ($include_adjustment) {
+          $adjustment_amount = $adjustment->getAmount();
+          // This shouldn't happen really, but we haven't investigated
+          // multi-currency scenarios so let's avoid uncaught exceptions.
+          if ($order_currency !== $adjustment_amount->getCurrencyCode()) {
+            continue;
+          }
+          // Make sure we don't fall lower than 0.
+          $is_adjustment_negative = $adjustment_amount->getNumber() < 0;
+          if ($is_adjustment_negative && !$subtotal_for_shipping->greaterThan($adjustment_amount->multiply('-1'))) {
+            continue;
+          }
+
+          $subtotal_for_shipping = $subtotal_for_shipping->add($adjustment_amount);
+        }
+      }
+    }
+
+    return $subtotal_for_shipping;
   }
 
   /**
